@@ -44,12 +44,20 @@ class HdmiSinkDtsSupportTest {
     }
 
     @Test
-    fun dtsGoesToFfmpegOnlyWhenTheSinkLacksDtsAndFfmpegDecodesIt() {
+    fun dtsGoesToFfmpegWhenPassthroughIsBlockedAndFfmpegDecodesIt() {
         val ffmpegDecodes = { _: String -> true }
         assertTrue(HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(MimeTypes.AUDIO_DTS_HD, ffmpegDecodes) { false })
         assertTrue(HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(MimeTypes.AUDIO_DTS, ffmpegDecodes) { false })
         assertFalse(HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(MimeTypes.AUDIO_DTS_HD, ffmpegDecodes) { true })
         assertFalse(HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(MimeTypes.AUDIO_DTS_HD, { false }) { false })
+    }
+
+    @Test
+    fun fireOsBeforeAndroid10StallsDtsPassthrough() {
+        assertTrue(HdmiSinkDtsSupport.dtsPassthroughStalls(manufacturer = "Amazon", sdkInt = 28))
+        assertTrue(HdmiSinkDtsSupport.dtsPassthroughStalls(manufacturer = "Amazon", sdkInt = 25))
+        assertFalse(HdmiSinkDtsSupport.dtsPassthroughStalls(manufacturer = "Amazon", sdkInt = 29))
+        assertFalse(HdmiSinkDtsSupport.dtsPassthroughStalls(manufacturer = "NVIDIA", sdkInt = 28))
     }
 
     @Test

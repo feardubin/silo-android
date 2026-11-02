@@ -150,8 +150,29 @@ class HdmiAudioSinkReportTest {
     fun amazonSurroundSettingCannotAddEntriesForFormatsMissingFromTheHdmiReport() {
         Settings.Global.putString(context.contentResolver, "external_surround_sound_enabled", "1")
         ShadowBuild.setManufacturer("Amazon")
-        val caps = capabilitiesForSink(6, AudioFormat.ENCODING_DTS)
-        assertEquals(setOf("dts"), caps.entries.map { it.codec }.toSet())
+        val caps = capabilitiesForSink(6, AudioFormat.ENCODING_E_AC3)
+        assertEquals(setOf("eac3"), caps.entries.map { it.codec }.toSet())
+    }
+
+    @Test
+    fun amazonBeforeAndroid10WithholdsDtsClaimsAndPreservesDolbyLayoutsAndPcmCeiling() {
+        ShadowBuild.setManufacturer("Amazon")
+        val caps = capabilitiesForSink(
+            8,
+            AudioFormat.ENCODING_AC3,
+            AudioFormat.ENCODING_DTS,
+            AudioFormat.ENCODING_DTS_HD,
+        )
+        assertEquals(setOf("ac3"), caps.passthroughCodecs.toSet())
+        assertEquals("ac3", caps.entries.single().codec)
+        assertEquals(listOf(2, 6), caps.entries.single().channelCounts)
+        assertEquals(8, caps.maxChannels)
+
+        // A trusted DTS-HD-only report cannot synthesize a DTS family claim.
+        val dtsOnly = capabilitiesForSink(8, AudioFormat.ENCODING_DTS_HD)
+        assertTrue(dtsOnly.passthroughCodecs.isEmpty())
+        assertTrue(dtsOnly.entries.isEmpty())
+        assertEquals(8, dtsOnly.maxChannels)
     }
 
     @Test

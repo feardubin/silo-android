@@ -75,26 +75,50 @@ object HdmiSinkDtsSupport {
 
     /**
      * True when a DTS track of [mimeType] must be decoded by FFmpeg: the sink
-     * does not decode DTS and the packaged FFmpeg build decodes this MIME.
+     * or device cannot pass DTS through reliably, and the packaged FFmpeg
+     * build decodes this MIME.
      * Without FFmpeg the platform path stays, since it is then the only
      * decoder there is.
      */
     internal fun shouldDecodeWithFfmpeg(
         mimeType: String?,
         ffmpegSupportsMimeType: (String) -> Boolean,
-        sinkDecodesDts: () -> Boolean,
+        canPassThroughDts: () -> Boolean,
     ): Boolean = mimeType != null &&
         mimeType in dtsMimeTypes &&
         ffmpegSupportsMimeType(mimeType) &&
-        !sinkDecodesDts()
+        !canPassThroughDts()
 
-    /** [shouldDecodeWithFfmpeg] against the HDMI sink on the active media route. */
+    /** [shouldDecodeWithFfmpeg] using this device and the active HDMI sink. */
     fun shouldDecodeWithFfmpeg(context: Context, mimeType: String?): Boolean =
         shouldDecodeWithFfmpeg(
             mimeType = mimeType,
             ffmpegSupportsMimeType = FfmpegAudioSupport::supportsMimeType,
-            sinkDecodesDts = { hdmiSinkDecodesDts(context) },
+            canPassThroughDts = { canPassThroughDts(context) },
         )
+
+    /**
+     * Whether DTS can be sent to the HDMI sink as a bitstream: the sink decodes
+     * DTS and the platform keeps a DTS passthrough stream fed.
+     */
+    fun canPassThroughDts(context: Context): Boolean =
+        !dtsPassthroughStalls() && hdmiSinkDecodesDts(context)
+
+    /**
+     * Whether DTS bitstream output is treated as unreliable on this device.
+     * Observed on a Fire TV Cube 3rd gen (Fire OS 7) connected straight to a
+     * DTS soundbar: DTS core and DTS-HD MA bitstreams both started, then the
+     * AudioTrack went up to 10 s without being written, media time ran well
+     * under real time and Media3 stopped the player with StuckPlayerException.
+     * The same tracks decoded by FFmpeg played without a stall. The rule covers
+     * every Amazon device before Android 10, which is broader than that
+     * evidence: a Cube that reaches a DTS sink through a TV may bitstream
+     * fine and loses that here. FFmpeg output is 16-bit PCM.
+     */
+    internal fun dtsPassthroughStalls(
+        manufacturer: String = Build.MANUFACTURER,
+        sdkInt: Int = Build.VERSION.SDK_INT,
+    ): Boolean = manufacturer.equals("Amazon", ignoreCase = true) && sdkInt < Build.VERSION_CODES.Q
 
     /**
      * [sinkAdvertisesDts] against the HDMI sink on the active media route.

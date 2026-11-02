@@ -272,9 +272,9 @@ class AudioCapabilityManager(
     }
 
     private fun mapCapabilities(caps: AudioCapabilities): AudioPassthroughCapabilities {
-        // The platform can accept DTS for a sink that does not decode it (an
-        // Amlogic box in front of an LG 2025 TV); never claim passthrough there.
-        val sinkDecodesDts by lazy { HdmiSinkDtsSupport.hdmiSinkDecodesDts(appContext) }
+        // Gate both native and HDMI-report-derived DTS claims on the same
+        // device and sink policy the player uses to select FFmpeg.
+        val canPassThroughDts by lazy { HdmiSinkDtsSupport.canPassThroughDts(appContext) }
         val preQ = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         val rawSinkReport = if (preQ) readHdmiAudioSinkReport() else null
         // Codec claims and entries use only a trusted report. An untrusted one
@@ -286,7 +286,7 @@ class AudioCapabilityManager(
                     (preQ && support.codec == "dts" &&
                         sinkReport?.encodings?.contains(AudioFormat.ENCODING_DTS_HD) == true &&
                         caps.supportsEncoding(AudioFormat.ENCODING_DTS_HD))) &&
-                (support.codec !in DTS_CODECS || sinkDecodesDts)
+                (support.codec !in DTS_CODECS || canPassThroughDts)
         }
         val codecs = supportedEncodings.map(EncodingSupport::codec)
 
