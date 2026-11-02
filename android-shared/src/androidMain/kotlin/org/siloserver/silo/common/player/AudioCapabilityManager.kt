@@ -226,8 +226,9 @@ class AudioCapabilityManager(
 
     private fun mapCapabilities(caps: AudioCapabilities): AudioPassthroughCapabilities {
         // The platform can accept DTS for a sink that does not decode it (an
-        // Amlogic box in front of an LG 2025 TV); never claim passthrough there.
-        val sinkDecodesDts by lazy { HdmiSinkDtsSupport.hdmiSinkDecodesDts(appContext) }
+        // Amlogic box in front of an LG 2025 TV), and Fire OS before Android 10
+        // stalls DTS passthrough; never claim passthrough there.
+        val sinkDecodesDts by lazy { HdmiSinkDtsSupport.canPassThroughDts(appContext) }
         val supportedEncodings = encodingSupport.filter { support ->
             Build.VERSION.SDK_INT >= support.minSdk &&
                 caps.supportsEncoding(support.encoding) &&
