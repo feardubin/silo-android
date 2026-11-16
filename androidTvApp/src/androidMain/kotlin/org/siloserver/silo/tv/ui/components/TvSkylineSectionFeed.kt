@@ -78,7 +78,9 @@ import org.siloserver.silo.tv.ui.theme.Spacing
 import org.siloserver.silo.tv.ui.theme.TvArtworkDimens
 import org.siloserver.silo.tv.ui.theme.TvSkyline
 import org.siloserver.silo.tv.ui.theme.TvSmoothBringIntoViewSpec
+import org.siloserver.silo.tv.ui.util.isAudiobookMediaType
 import kotlinx.coroutines.CancellationException
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
@@ -539,6 +541,7 @@ fun TvSkylineSectionFeed(
                 backdropHeight = TvArtworkDimens.HeroArtHeight.roundToPx(),
                 logoWidth = TvArtworkDimens.MarqueeLogoWidth.roundToPx(),
                 logoHeight = TvArtworkDimens.MarqueeLogoHeight.roundToPx(),
+                coverHeight = TvHeroCoverHeight.roundToPx(),
             )
         }
     }
@@ -598,6 +601,19 @@ fun TvSkylineSectionFeed(
                                             ImageRequest.Builder(context)
                                                 .data(url)
                                                 .size(heroPreload.backdropWidth, heroPreload.backdropHeight)
+                                                .build(),
+                                        )
+                                    }
+                                }
+                                // Without a backdrop the hero frames the detail's poster.
+                                val coverAspect = item.heroCoverAspect()
+                                val coverUrl = enrichment.posterUrl
+                                if (coverAspect != null && coverUrl != null) {
+                                    runCatching {
+                                        loader.execute(
+                                            ImageRequest.Builder(context)
+                                                .data(coverUrl)
+                                                .size((heroPreload.coverHeight * coverAspect).roundToInt(), heroPreload.coverHeight)
                                                 .build(),
                                         )
                                     }
@@ -1122,7 +1138,7 @@ fun TvSkylineSectionFeed(
                             itemSpacing = TvSkylineItemSpacing,
                             rowTopPadding = TvSkylineRowCardVerticalPadding,
                             rowBottomPadding = TvSkylineRowCardVerticalPadding,
-                            posterWidth = RowDimens.DensePosterWidth *
+                            posterWidth = tvSkylineDenseCardWidth(section) *
                                 presentation.posterSize.posterScale,
                             firstItemFocusRequester = resolvedFirstRowFocusRequester
                                 .takeIf { isFirstRow },
@@ -1210,6 +1226,7 @@ private data class HeroPreloadSizes(
     val backdropHeight: Int,
     val logoWidth: Int,
     val logoHeight: Int,
+    val coverHeight: Int,
 )
 
 private const val HeroFocusPrefetchRadius = 2
@@ -1239,6 +1256,17 @@ private val TvSkylineRowPreviewPeek = 24.dp // sliver of the next section's head
 
 /** The band never pushes the marquee below ~40% of the screen. */
 internal const val TvSkylineRowBandMaxFraction = 0.58f
+
+/**
+ * Card width for a Skyline row. A row of square audiobook covers is as wide
+ * as it needs to be as tall as a dense poster (tvOS
+ * `SiloTheme.Skyline.denseCardWidth(for:)`), so it fills the same band. Rows
+ * that mix shapes keep the poster width.
+ */
+internal fun tvSkylineDenseCardWidth(section: ResolvedSection): Dp {
+    val squareRow = section.items.isNotEmpty() && section.items.all { isAudiobookMediaType(it.type) }
+    return if (squareRow) RowDimens.DensePosterWidth * 3f / 2f else RowDimens.DensePosterWidth
+}
 
 internal fun tvSkylineRowBandHeight(presentation: CardPresentation): Dp {
     val cardHeight = RowDimens.DensePosterWidth * presentation.posterSize.posterScale * 3f / 2f

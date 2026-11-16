@@ -23,6 +23,7 @@ import org.siloserver.silo.model.section.ResolvedSection
 import org.siloserver.silo.model.section.SectionItem
 import org.siloserver.silo.model.settings.EpisodeSpoilerPrefs
 import org.siloserver.silo.model.settings.EpisodeSpoilers
+import org.siloserver.silo.tv.ui.util.isAudiobookMediaType
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -72,6 +73,14 @@ data class TvMarqueeContent(
     val backdropIsEpisodeStill: Boolean? = null,
     /** The server's air date the detail line opens with as "Aired Mar 12, 2026"; null when unknown. */
     val airDate: String? = null,
+    /**
+     * Width over height of the poster standing in for a missing backdrop:
+     * [TvSquareCoverAspect] for audiobooks, [TvPosterCoverAspect] for posters.
+     * The hero frames that cover whole instead of cropping it across the
+     * backdrop area. Null for a real backdrop, or an episode, whose poster can
+     * be a landscape still.
+     */
+    val coverAspect: Float? = null,
 ) {
     /** Backdrop art for the root hero. Like tvOS, the section artwork is shown
      *  immediately; an episode can later upgrade to its higher-resolution series
@@ -129,17 +138,24 @@ data class TvMarqueeContent(
             !enrichment.backdropUrl.isNullOrBlank() &&
             (!hidesStills || enrichment.backdropIsEpisodeStill == false)
         val enrichedLine = enrichment.detailLine != null || enrichment.airDate != null
-        return copy(
+        val withLine = copy(
             detailLine = if (enrichedLine) enrichment.detailLine else detailLine,
             airDate = if (enrichedLine) enrichment.airDate else airDate,
-            backdropUrl = if (upgradeBackdrop) enrichment.backdropUrl else backdropUrl,
-            backdropThumbhash = if (upgradeBackdrop) {
-                enrichment.backdropThumbhash ?: backdropThumbhash
-            } else {
-                backdropThumbhash
-            },
-            backdropIsEpisodeStill = if (upgradeBackdrop) enrichment.backdropIsEpisodeStill else backdropIsEpisodeStill,
         )
+        return when {
+            upgradeBackdrop -> withLine.copy(
+                backdropUrl = enrichment.backdropUrl,
+                backdropThumbhash = enrichment.backdropThumbhash ?: backdropThumbhash,
+                backdropIsEpisodeStill = enrichment.backdropIsEpisodeStill,
+            )
+            // A framed cover uses the detail's poster, which the server sizes
+            // for the detail page and so comes back sharper than the card's.
+            // Its ThumbHash is already the same item's poster's.
+            coverAspect != null && !enrichment.posterUrl.isNullOrBlank() -> withLine.copy(
+                backdropUrl = enrichment.posterUrl,
+            )
+            else -> withLine
+        }
     }
 
     companion object {
@@ -217,6 +233,7 @@ data class TvMarqueeContent(
                 } else {
                     item.posterIsEpisodeStill
                 },
+                coverAspect = item.heroCoverAspect(),
             )
         }
 
@@ -323,6 +340,8 @@ data class TvMarqueeEnrichment(
     /** The detail's provenance for [backdropUrl]; null when unknown. */
     val backdropIsEpisodeStill: Boolean? = null,
     val airDate: String? = null,
+    /** The detail's poster, which a framed hero cover prefers. */
+    val posterUrl: String? = null,
 ) {
     companion object {
         fun from(detail: ItemDetail): TvMarqueeEnrichment {
@@ -337,6 +356,7 @@ data class TvMarqueeEnrichment(
                 backdropThumbhash = detail.backdropThumbhash,
                 backdropIsEpisodeStill = detail.backdropIsEpisodeStill,
                 airDate = detail.airDate?.takeIf { airDateText(it) != null },
+                posterUrl = detail.posterUrl?.takeIf { it.isNotBlank() },
             )
         }
 
@@ -477,6 +497,24 @@ class TvFocusMarqueeState internal constructor() {
         if (content?.contentId == contentId) enrichment = value
     }
 }
+
+/**
+ * The shape the root hero frames this item's poster at when it has no
+ * backdrop: square for audiobooks, 2:3 for other posters. Null when it has a
+ * backdrop, and for an episode, whose poster can be a landscape still.
+ */
+internal fun SectionItem.heroCoverAspect(): Float? = when {
+    type.equals("episode", ignoreCase = true) || posterIsEpisodeStill == true -> null
+    !backdropUrl.isNullOrBlank() || posterUrl.isNullOrBlank() -> null
+    isAudiobookMediaType(type) -> TvSquareCoverAspect
+    else -> TvPosterCoverAspect
+}
+
+/** [TvMarqueeContent.coverAspect] for a square audiobook cover. */
+const val TvSquareCoverAspect = 1f
+
+/** [TvMarqueeContent.coverAspect] for a 2:3 poster. */
+const val TvPosterCoverAspect = 2f / 3f
 
 /** Tuned Skyline timing: 0.5 s with the tvOS `.easeInOut` curve. */
 const val TvMarqueeCrossfadeMs = 500
