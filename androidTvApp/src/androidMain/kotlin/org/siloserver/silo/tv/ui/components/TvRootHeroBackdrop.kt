@@ -168,12 +168,6 @@ fun TvRootHeroBackdrop(
             )
         }
 
-        // Android 7 and 8 need grain in the wash behind the artwork. A
-        // flat background is already smooth and doesn't need lightening.
-        if (isVisible && targetAccent != background && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            DitheredWashOverlay(alpha = TintOnlyDitherAlpha, modifier = Modifier.fillMaxSize())
-        }
-
         if (artTransition != null) {
             artTransition.Crossfade(animationSpec = artSpec) { value ->
                 LandscapeHeroArt(artUnderPrefs(value))
@@ -188,9 +182,10 @@ fun TvRootHeroBackdrop(
             CornerFade(washStops = washStops)
         }
 
-        // From Android 9 the wash is dithered in its shader; this white grain
-        // would only lift an OLED's black.
-        if ((hasTintOnlyWash || hasEmptyWash) && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        // Android 7 and 8 still use grain on the wash behind a framed cover.
+        // From Android 9 the wash shader supplies its own dither.
+        val hasCoverWash = content?.coverAspect != null && targetAccent != background
+        if ((hasCoverWash || hasTintOnlyWash || hasEmptyWash) && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             DitheredWashOverlay(
                 alpha = if (hasEmptyWash) EmptyWashDitherAlpha else TintOnlyDitherAlpha,
                 modifier = Modifier.fillMaxSize(),
@@ -217,25 +212,22 @@ private fun LandscapeHeroArt(content: TvMarqueeContent?) {
     }
 }
 
-@Composable
-private fun FramedHeroArt(content: TvMarqueeContent?) {
-    val url = content?.heroBackdropUrl ?: return
-    val aspect = content.coverAspect ?: return
-    FramedCover(url = url, thumbhash = content.heroBackdropThumbhash, aspect = aspect)
-}
-
 /**
  * A cover standing in for a missing backdrop, drawn whole and sharp at a size
  * its artwork can carry (tvOS `coverImage`): top-right, between the top menu
  * and the rows, over a soft glow of itself and a drop shadow.
  */
 @Composable
-private fun FramedCover(url: String, thumbhash: String?, aspect: Float) {
+private fun FramedHeroArt(content: TvMarqueeContent?) {
+    val url = content?.heroBackdropUrl ?: return
+    val aspect = content.coverAspect ?: return
+    // Keep the glow on the card poster when the sharper detail poster loads.
+    val glowUrl = content.posterUrl ?: url
     val shape = RoundedCornerShape(CoverCornerRadius)
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
         ThumbhashImage(
             url = url,
-            thumbhash = thumbhash,
+            thumbhash = content.heroBackdropThumbhash,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             // As for the backdrop, the feed owns the one shared crossfade.
@@ -243,7 +235,7 @@ private fun FramedCover(url: String, thumbhash: String?, aspect: Float) {
             modifier = Modifier
                 .padding(top = CoverTopInset, end = CoverTrailingInset)
                 .size(width = TvHeroCoverHeight * aspect, height = TvHeroCoverHeight)
-                .coverGlow(url, aspect)
+                .coverGlow(glowUrl, aspect)
                 .shadow(CoverShadowElevation, shape)
                 .clip(shape),
         )
