@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
+import org.siloserver.silo.model.auth.PasswordRequirements
 import org.siloserver.silo.network.ApiResult
 import org.siloserver.silo.network.SiloAuthPlugin
 import org.siloserver.silo.network.SiloJson
@@ -29,18 +30,22 @@ class AuthApiUnauthenticatedProbeTest {
     )
 
     @Test
-    fun candidateSetupAndSignupProbesOmitActiveAuthAndProfileHeaders() = runTest {
+    fun candidateAuthProbesOmitActiveAuthAndProfileHeaders() = runTest {
         val tokenManager = activeTokenManager()
         val captured = mutableListOf<CapturedRequest>()
         val api = AuthApi(probeClient(tokenManager, captured), ApiV2Gate.Unrestricted)
 
         assertIs<ApiResult.Success<*>>(api.getSetupStatus("https://candidate.example/"))
         assertIs<ApiResult.Success<*>>(api.getSignupStatus("https://candidate.example/"))
+        val policy = assertIs<ApiResult.Success<PasswordPolicyV2>>(api.getPasswordPolicy("https://candidate.example/")).data
+        val fallback = PasswordRequirements(10, 64)
+        assertEquals(PasswordRequirements(12, 64, requireSpecial = true), policy.requirements(fallback))
 
         assertEquals(
             listOf(
                 "https://candidate.example/api/v2/system/setup",
                 "https://candidate.example/api/v2/auth/signup",
+                "https://candidate.example/api/v2/auth/password-policy",
             ),
             captured.map { it.url },
         )
@@ -104,6 +109,8 @@ class AuthApiUnauthenticatedProbeTest {
                         """{"error":"unauthorized","message":"not authorized"}"""
                     request.url.encodedPath.endsWith("/auth/signup") ->
                         """{"enabled":true}"""
+                    request.url.encodedPath.endsWith("/auth/password-policy") ->
+                        """{"minimum_length":12,"require_special":true,"future_rule":true}"""
                     else ->
                         """{"needs_setup":false}"""
                 }

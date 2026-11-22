@@ -51,15 +51,16 @@ class AuthApi(
         }.requireAuthStatus(200)
     }
 
-    suspend fun signup(request: SignupRequest, serverUrl: String? = null): ApiResult<LoginResponse> = safeApiV2Call<TokenPairV2>(apiV2Gate) {
-        client.post("${serverUrl?.trimEnd('/').orEmpty()}/api/v2/auth/signup") {
-            skipSiloAuth(); singleAttempt()
-            contentType(ContentType.Application.Json); setBody(request)
-        }.requireAuthStatus(201)
-    }.map { it.domain() }
+    suspend fun signup(request: SignupRequest, serverUrl: String? = null): ApiResult<LoginResponse> =
+        safeApiV2Call<TokenPairV2>(apiV2Gate, validationField = "body.password") {
+            client.post("${serverUrl?.trimEnd('/').orEmpty()}/api/v2/auth/signup") {
+                skipSiloAuth(); singleAttempt()
+                contentType(ContentType.Application.Json); setBody(request)
+            }.requireAuthStatus(201)
+        }.map { it.domain() }
 
     suspend fun setup(username: String, email: String, password: String, serverUrl: String? = null): ApiResult<LoginResponse> =
-        safeApiV2Call<TokenPairV2>(apiV2Gate) {
+        safeApiV2Call<TokenPairV2>(apiV2Gate, validationField = "body.password") {
             client.post("${serverUrl?.trimEnd('/').orEmpty()}/api/v2/auth/setup") {
                 skipSiloAuth(); singleAttempt()
                 contentType(ContentType.Application.Json)
@@ -125,6 +126,13 @@ class AuthApi(
         }.requireAuthStatus(200)
     }
 
+    /** Public on the target server, including before signup or an invitation claim. */
+    internal suspend fun getPasswordPolicy(serverUrl: String): ApiResult<PasswordPolicyV2> =
+        safeApiV2Call(ApiV2Gate.Unrestricted) {
+            client.get("${serverUrl.trimEnd('/')}/api/v2/auth/password-policy") { skipSiloAuth() }
+                .requireAuthStatus(200)
+        }
+
     suspend fun invitationCapabilities(serverUrl: String): ApiResult<InvitationCapabilities> =
         safeApiV2Call(ApiV2Gate.Unrestricted) {
             client.get("${serverUrl.trimEnd('/')}/api/v2/invitations/capabilities") { skipSiloAuth() }
@@ -138,7 +146,7 @@ class AuthApi(
         password: String,
         tokenInBody: Boolean,
     ): ApiResult<InvitationAcceptance> =
-        safeApiV2Call<InvitationAcceptanceV2>(ApiV2Gate.Unrestricted) {
+        safeApiV2Call<InvitationAcceptanceV2>(ApiV2Gate.Unrestricted, validationField = "body.password") {
             val base = "${serverUrl.trimEnd('/')}/api/v2/invitations"
             val url = if (tokenInBody) "$base/accept" else "$base/${token.encodeURLPathPart()}/accept"
             client.post(url) {
@@ -235,7 +243,7 @@ internal fun passwordChangeError(status: Int, body: String): ApiResult.Error {
     val problem = runCatching { SiloJson.decodeFromString(Problem.serializer(), body) }.getOrNull()
     val rejected = problem?.errors?.firstOrNull()
     // A refused field's own detail is the most specific server text.
-    val detail = if (status == 422) rejected?.detail.orEmpty() else problem?.detail.orEmpty()
+    val detail = rejected?.detail?.takeIf { status == 422 && it.isNotBlank() } ?: problem?.detail.orEmpty()
     val message = problem?.let { ProblemText.message(it, detail) } ?: detail
     val code = if (status == 422 && rejected?.location == "body.current_password") WRONG_CURRENT_PASSWORD else problem?.code.orEmpty()
     return ApiResult.Error(status, code, message, detail)

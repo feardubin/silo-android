@@ -27,6 +27,7 @@ import org.siloserver.silo.network.reportStaleProfileIfRefused
  */
 internal suspend inline fun <reified T> safeApiV2Call(
     gate: ApiV2Gate,
+    validationField: String? = null,
     block: () -> HttpResponse,
 ): ApiResult<T> {
     gate.blocked()?.let { return it }
@@ -42,7 +43,7 @@ internal suspend inline fun <reified T> safeApiV2Call(
                 ApiResult.Success(SiloJson.decodeFromJsonElement<T>(body))
             }
         } else {
-            response.toApiV2Error()
+            response.toApiV2Error(validationField)
         }
     } catch (e: CancellationException) {
         throw e
@@ -51,7 +52,7 @@ internal suspend inline fun <reified T> safeApiV2Call(
     }
 }
 
-internal suspend fun HttpResponse.toApiV2Error(): ApiResult.Error {
+internal suspend fun HttpResponse.toApiV2Error(validationField: String? = null): ApiResult.Error {
     val problem = try {
         SiloJson.decodeFromString(Problem.serializer(), bodyAsText())
     } catch (_: Exception) {
@@ -61,7 +62,12 @@ internal suspend fun HttpResponse.toApiV2Error(): ApiResult.Error {
     // A stale profile proof is the server's way of asking for the PIN again
     // after an access change; the recovery decides whether it applies.
     reportStaleProfileIfRefused(code)
-    val detail = problem?.detail ?: ""
+    val fieldDetail = if (status.value == 422 && code == "validation_failed" && validationField != null) {
+        problem?.errors?.firstOrNull { it.location == validationField && it.detail.isNotBlank() }?.detail
+    } else {
+        null
+    }
+    val detail = fieldDetail ?: problem?.detail.orEmpty()
     return ApiResult.Error(
         code = status.value,
         error = code,
@@ -69,6 +75,7 @@ internal suspend fun HttpResponse.toApiV2Error(): ApiResult.Error {
         // screens get copy a person can act on.
         message = when {
             code == PASSWORD_CHANGE_REQUIRED -> PASSWORD_CHANGE_REQUIRED_MESSAGE
+            fieldDetail != null -> fieldDetail
             problem != null -> ProblemText.message(problem)
             else -> ""
         },

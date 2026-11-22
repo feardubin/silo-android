@@ -36,6 +36,7 @@ import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeScreen
 import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeCard
 import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeCardSymbol
 import org.siloserver.silo.common.ui.marquee.MarqueeColors
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -119,6 +120,7 @@ fun TvSetupScreen(
                             enabled = !state.isLoading,
                         )
                     }
+                    PasswordPolicyHints(state.requirements)
                 }
                 state.error?.let { TvMarqueeErrorText(it.text(), Modifier.width(380.dp).padding(top = 8.dp)) }
                 TvMarqueeButton(

@@ -94,7 +94,7 @@ class CollectionApi(
 
     private suspend inline fun <reified T> guarded(editor: CollectionEditor<*>, block: () -> HttpResponse): ApiResult<T> {
         if (editor.scope != null && !editor.scope.stillOwns(tokenManager, OwnerPolicy.IDENTITY)) return identityChanged()
-        val result = safeApiV2Call<T>(gate, block)
+        val result = safeApiV2Call<T>(gate, block = block)
         return if (result is ApiResult.Error && result.code == 412)
             result.copy(message = "This collection changed. Reload before trying again; your changes have been kept.")
         else result

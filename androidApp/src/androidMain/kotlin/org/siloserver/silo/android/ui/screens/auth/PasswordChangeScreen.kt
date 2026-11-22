@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -21,7 +20,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.koin.compose.viewmodel.koinViewModel
 import org.siloserver.silo.android.ui.components.marquee.MarqueeButton
 import org.siloserver.silo.android.ui.components.marquee.MarqueeButtonKind
@@ -34,9 +32,9 @@ import org.siloserver.silo.android.ui.components.marquee.MarqueeStage
 import org.siloserver.silo.android.ui.components.marquee.MarqueeTextField
 import org.siloserver.silo.common.R as CommonR
 import org.siloserver.silo.common.i18n.text
-import org.siloserver.silo.common.ui.marquee.MarqueeColors
 import org.siloserver.silo.common.ui.marquee.MarqueeScene
 import org.siloserver.silo.common.ui.marquee.MarqueeScrimStyle
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 import org.siloserver.silo.common.ui.marquee.marqueeShake
 import org.siloserver.silo.viewmodel.PasswordChangePhase
 import org.siloserver.silo.viewmodel.PasswordChangeViewModel
@@ -117,6 +115,7 @@ fun PasswordChangeScreen(
                             isSecure = true,
                             enabled = !state.isBusy,
                         )
+                        PasswordPolicyHints(state.requirements, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                         MarqueeSeparator()
                         MarqueeTextField(
                             value = state.confirmation,
@@ -130,12 +129,6 @@ fun PasswordChangeScreen(
                             onImeAction = save,
                         )
                     }
-                    Text(
-                        state.requirementsHint.text(),
-                        color = MarqueeColors.InkTertiary,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 10.dp, start = 4.dp),
-                    )
                     state.error?.let { MarqueeErrorText(it.text.text(), Modifier.padding(top = 10.dp, start = 4.dp).then(announced)) }
                     MarqueeButton(
                         text = stringResource(if (state.isBusy) CommonR.string.signIn_passwordChange_saving else CommonR.string.signIn_passwordChange_save),

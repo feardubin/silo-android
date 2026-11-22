@@ -41,6 +41,7 @@ import org.siloserver.silo.android.ui.components.marquee.MarqueeWordmark
 import org.siloserver.silo.common.i18n.text
 import org.siloserver.silo.common.ui.marquee.MarqueeColors
 import org.siloserver.silo.common.ui.marquee.MarqueeScrimStyle
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 import org.siloserver.silo.common.ui.marquee.ServerBranding
 
 /**
@@ -177,6 +178,7 @@ fun InviteClaimScreen(
                         placeholder = stringResource(CommonR.string.tvSignIn_form_passwordPlaceholder),
                         isSecure = true,
                     )
+                    PasswordPolicyHints(state.requirements, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                     MarqueeSeparator()
                     MarqueeTextField(
                         value = state.confirmPassword,

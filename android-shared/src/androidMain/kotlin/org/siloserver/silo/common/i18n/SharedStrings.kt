@@ -24,6 +24,9 @@ internal val SharedString.resId: Int
         SharedString.PasswordNewRequired -> R.string.signIn_passwordChange_error_newRequired
         SharedString.PasswordTemporaryRequired -> R.string.signIn_passwordChange_error_temporaryRequired
         SharedString.PasswordMismatch -> R.string.signIn_passwordChange_error_mismatch
+        SharedString.PasswordMaximumBytes -> R.string.signIn_passwordChange_maximumBytes
+        SharedString.PasswordNeedsUppercase -> R.string.web_auth_newPassword_needsUppercase
+        SharedString.PasswordNeedsSpecial -> R.string.web_auth_newPassword_needsSpecial
         SharedString.PasswordTooLong -> R.string.signIn_passwordChange_error_tooLong
         SharedString.PasswordTemporaryIncorrect -> R.string.signIn_passwordChange_error_temporaryIncorrect
         SharedString.PasswordRejected -> R.string.signIn_passwordChange_error_rejected

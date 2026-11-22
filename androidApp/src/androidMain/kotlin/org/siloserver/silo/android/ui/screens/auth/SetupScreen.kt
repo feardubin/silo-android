@@ -27,6 +27,7 @@ import org.siloserver.silo.android.ui.components.marquee.MarqueeTextField
 import org.siloserver.silo.android.ui.components.marquee.MarqueeWordmark
 import org.siloserver.silo.common.i18n.text
 import org.siloserver.silo.common.ui.marquee.MarqueeScrimStyle
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 
 /**
  * First-run admin account creation on a server that has none yet. An Android
@@ -83,6 +84,7 @@ fun SetupScreen(
                 imeAction = ImeAction.Go,
                 onImeAction = viewModel::onCreateAccountClick,
             )
+            PasswordPolicyHints(state.requirements, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
         }
         state.error?.let { MarqueeErrorText(it.text(), Modifier.padding(top = 10.dp)) }
         MarqueeButton(

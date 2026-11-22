@@ -16,6 +16,7 @@ import org.siloserver.silo.common.network.cleartextOrigin
 import org.siloserver.silo.common.R as CommonR
 import org.siloserver.silo.common.i18n.errorText
 import org.siloserver.silo.model.auth.InvitationLookupResponse
+import org.siloserver.silo.model.auth.PasswordRequirements
 import org.siloserver.silo.network.ApiResult
 import org.siloserver.silo.network.CleartextOriginNotApprovedException
 import org.siloserver.silo.network.requiresApproval
@@ -36,6 +37,7 @@ data class InviteClaimUiState(
      * manual server-setup flow collects.
      */
     val pendingCleartextOrigin: String? = null,
+    val requirements: PasswordRequirements = PasswordRequirements.ServerDefault,
     val password: String = "",
     val confirmPassword: String = "",
     val isSubmitting: Boolean = false,
@@ -95,8 +97,16 @@ class InviteClaimViewModel(
         val result = authRepository.lookupInvitation(serverUrl, token)
         if (generation != lookupGeneration.value) return
         when (result) {
-            is ApiResult.Success -> _uiState.update {
-                it.copy(isLoadingInvitation = false, invitation = result.data)
+            is ApiResult.Success -> {
+                val requirements = if (result.data.acceptanceAvailable) {
+                    authRepository.publicPasswordRequirements(serverUrl)
+                } else {
+                    PasswordRequirements.ServerDefault
+                }
+                if (generation != lookupGeneration.value) return
+                _uiState.update {
+                    it.copy(isLoadingInvitation = false, invitation = result.data, requirements = requirements)
+                }
             }
             is ApiResult.Error -> {
                 // Only statuses that speak about the token itself are
@@ -152,12 +162,9 @@ class InviteClaimViewModel(
         if (current.isSubmitting || current.pendingCleartextOrigin != null || current.claimSuccess ||
             current.signInRequiredUsername != null || current.acceptanceUncertain ||
             current.invitation?.acceptanceAvailable != true) return
-        val validationError = when {
-            current.password.codePointCount(0, current.password.length) < 8 -> uiText(CommonR.string.account_create_error_passwordShort)
-            current.password.toByteArray(Charsets.UTF_8).size > 72 -> uiText(CommonR.string.account_create_error_passwordLong)
-            current.password != current.confirmPassword -> uiText(CommonR.string.account_create_error_passwordMismatch)
-            else -> null
-        }
+        val validationError = current.requirements.problem(current.password)?.text
+            ?: uiText(CommonR.string.account_create_error_passwordMismatch)
+                .takeIf { current.password != current.confirmPassword }
         if (validationError != null) {
             _uiState.update { it.copy(error = validationError) }
             return

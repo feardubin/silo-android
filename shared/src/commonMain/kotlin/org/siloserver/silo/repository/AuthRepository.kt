@@ -355,8 +355,21 @@ class AuthRepository(
 
     override suspend fun passwordRequirements(): PasswordRequirements {
         val scope = tokenManager.snapshotCurrentScope() ?: return PasswordRequirements.ServerDefault
-        val capability = authApi.passwordCapability(scope).getOrNull() ?: return PasswordRequirements.ServerDefault
-        return PasswordRequirements.from(capability)
+        val policy = authApi.getPasswordPolicy(scope.serverUrl).getOrNull()
+        val fallback = if (policy?.hasLengthLimits != true) {
+            authApi.passwordCapability(scope).getOrNull()?.let { PasswordRequirements.from(it) }
+        } else {
+            null
+        } ?: PasswordRequirements.ServerDefault
+        return policy?.requirements(fallback) ?: fallback
+    }
+
+    /** Public forms have no account capability to consult on the target server. */
+    suspend fun publicPasswordRequirements(serverUrl: String? = null): PasswordRequirements {
+        val target = serverUrl ?: tokenManager.getServerUrl()
+        val defaults = PasswordRequirements.ServerDefault
+        if (target.isBlank()) return defaults
+        return authApi.getPasswordPolicy(target).getOrNull()?.requirements(defaults) ?: defaults
     }
 
     override suspend fun changePassword(current: String, new: String): ApiResult<Unit> {

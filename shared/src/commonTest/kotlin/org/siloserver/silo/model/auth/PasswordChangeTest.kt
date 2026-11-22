@@ -71,6 +71,40 @@ class PasswordChangeTest {
     }
 
     @Test
+    fun uppercaseUsesUnicodeLuIncludingSupplementaryLetters() {
+        val rules = PasswordRequirements.ServerDefault.copy(requireUppercase = true)
+        for (capital in listOf("A", "É", "Ж", "𐐀")) {
+            assertNull(rules.problem("abcdefg$capital"), capital)
+        }
+        for (nonCapital in listOf("é", "ж", "ǅ", "Ⅰ")) {
+            assertEquals(PasswordChangeError.NeedsUppercase, rules.problem("abcdefg$nonCapital"), nonCapital)
+        }
+    }
+
+    @Test
+    fun onlyUnicodePunctuationAndSymbolsCountAsSpecial() {
+        val rules = PasswordRequirements.ServerDefault.copy(requireSpecial = true)
+        for (special in listOf("!", "€", "😀", "—", "_")) {
+            assertNull(rules.problem("abcdefg$special"), special)
+        }
+        for (other in listOf("9", " ", "É", "\u0301")) {
+            assertEquals(PasswordChangeError.NeedsSpecial, rules.problem("abcdefg$other"), other)
+        }
+    }
+
+    @Test
+    fun byteLimitAllowsAnExactFitAndRejectsAnExtraByte() {
+        val rules = PasswordRequirements.ServerDefault.copy(requireUppercase = true, requireSpecial = true)
+        val exactFit = "É" + "a".repeat(66) + "😀"
+        assertNull(rules.problem(exactFit))
+        assertEquals(PasswordChangeError.TooLong, rules.problem(exactFit + "b"))
+        assertEquals(PasswordChangeError.TooShort(8), rules.problem("a"))
+        assertEquals(PasswordChangeError.NeedsUppercase, rules.problem("abcdefgh"))
+        assertEquals(PasswordChangeError.NeedsSpecial, rules.problem("Abcdefgh"))
+        assertEquals(PasswordChangeError.TooLong, rules.copy(maximumBytes = 71).problem(exactFit))
+    }
+
+    @Test
     fun limitsComeFromTheCapabilityWithServerDefaultsAsFallback() {
         assertEquals(
             PasswordRequirements(minimumLength = 12, maximumBytes = 64),

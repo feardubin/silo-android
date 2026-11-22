@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import org.siloserver.silo.common.i18n.UiText
 import org.siloserver.silo.common.i18n.uiText
+import org.siloserver.silo.model.auth.PasswordRequirements
 import org.siloserver.silo.network.ApiResult
 import org.siloserver.silo.common.R as CommonR
 import org.siloserver.silo.repository.AuthRepository
@@ -18,6 +19,7 @@ data class SetupUiState(
     val username: String = "",
     val email: String = "",
     val password: String = "",
+    val requirements: PasswordRequirements = PasswordRequirements.ServerDefault,
     val isLoading: Boolean = false,
     val error: UiText? = null,
     val setupSuccess: Boolean = false,
@@ -32,6 +34,11 @@ class SetupViewModel(
 
     private val _uiState = MutableStateFlow(SetupUiState())
     val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
+
+    private val loadRequirements = viewModelScope.launch {
+        val requirements = authRepository.publicPasswordRequirements()
+        _uiState.update { it.copy(requirements = requirements) }
+    }
 
     fun onUsernameChanged(value: String) {
         _uiState.update { it.copy(username = value, error = null) }
@@ -58,7 +65,12 @@ class SetupViewModel(
 
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-
+            loadRequirements.join()
+            val passwordError = _uiState.value.requirements.problem(current.password)
+            if (passwordError != null) {
+                _uiState.update { it.copy(isLoading = false, error = passwordError.text) }
+                return@launch
+            }
             when (val result = authRepository.setup(current.username, current.email, current.password)) {
                 is ApiResult.Success -> {
                     _uiState.update { it.copy(isLoading = false, setupSuccess = true) }
@@ -93,8 +105,7 @@ class SetupViewModel(
         if (state.username.isBlank()) return uiText(CommonR.string.tvSignIn_error_usernameRequired)
         if (state.email.isBlank()) return uiText(CommonR.string.account_create_error_emailRequired)
         if (!state.email.contains("@")) return uiText(CommonR.string.account_create_error_emailInvalid)
-        if (state.password.isBlank()) return uiText(CommonR.string.tvSignIn_error_passwordRequired)
-        if (state.password.length < 8) return uiText(CommonR.string.account_create_error_passwordShort)
+        if (state.password.isEmpty()) return uiText(CommonR.string.tvSignIn_error_passwordRequired)
         return null
     }
 }

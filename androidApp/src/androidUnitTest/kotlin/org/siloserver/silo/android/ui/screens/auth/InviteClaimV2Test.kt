@@ -12,7 +12,9 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
+import org.siloserver.silo.common.i18n.UiText
 import org.siloserver.silo.common.network.CleartextConsentStore
+import org.siloserver.silo.model.auth.PasswordChangeError
 import org.siloserver.silo.network.*
 import org.siloserver.silo.network.api.AuthApi
 import org.siloserver.silo.repository.AuthRepository
@@ -150,6 +152,43 @@ class InviteClaimV2Test {
         } finally { Dispatchers.resetMain() }
     }
 
+    @Test fun claimChecksTheInviteServersPolicyAndShowsItsFieldRefusal() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val tokens = TokenManagerImpl().apply { setServerUrl("https://existing.example.test") }
+        var posts = 0
+        val client = client { request ->
+            assertEquals("invite.example.test", request.url.host)
+            when (request.url.encodedPath) {
+                "/api/v2/invitations/capabilities" -> capability to HttpStatusCode.OK
+                "/api/v2/auth/password-policy" ->
+                    """{"minimum_length":8,"maximum_bytes":72,"require_uppercase":true,"require_special":true}""" to HttpStatusCode.OK
+                "/api/v2/invitations/token/accept" -> {
+                    posts++
+                    """{"type":"https://siloserver.org/problems/validation_failed","title":"Refused","status":422,"detail":"Invalid request.","errors":[{"location":"body.password","code":"invalid","detail":"Use at least 13 characters."}]}""" to
+                        HttpStatusCode.UnprocessableEntity
+                }
+                else -> lookup to HttpStatusCode.OK
+            }
+        }
+        val vm = InviteClaimViewModel(AuthRepository(AuthApi(client, ApiV2Gate.Unrestricted), tokens), consent)
+        try {
+            ready(vm)
+            vm.onClaimClick()
+            assertEquals(PasswordChangeError.NeedsUppercase.text, vm.uiState.value.error)
+            vm.onPasswordChanged("Password"); vm.onConfirmPasswordChanged("Password")
+            vm.onClaimClick()
+            assertEquals(PasswordChangeError.NeedsSpecial.text, vm.uiState.value.error)
+            assertEquals(0, posts)
+
+            vm.onPasswordChanged("Password😀"); vm.onConfirmPasswordChanged("Password😀")
+            vm.onClaimClick()
+            val refused = vm.uiState.first { it.error != null }
+            assertEquals(UiText.Raw("Use at least 13 characters."), refused.error)
+            assertFalse(refused.acceptanceUncertain)
+            assertEquals(1, posts)
+        } finally { vm.viewModelScope.cancel(); client.close(); Dispatchers.resetMain() }
+    }
+
     @Test fun successfulClaimInstallsNestedSessionAndRoutesOnlyAfterCommit() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val tokens = TokenManagerImpl().apply { setServerUrl("https://existing.example.test") }
@@ -185,6 +224,7 @@ class InviteClaimV2Test {
             val (body, status) = when (request.url.encodedPath) {
                 "/api/v2/invitations/capabilities" -> capability.replace("}", ",\"token_in_body\":true}") to HttpStatusCode.OK
                 "/api/v2/invitations/lookup" -> lookup to HttpStatusCode.OK
+                "/api/v2/auth/password-policy" -> "" to HttpStatusCode.NotFound
                 "/api/v2/invitations/accept" -> signedIn to HttpStatusCode.Created
                 else -> "" to HttpStatusCode.MethodNotAllowed
             }
@@ -213,7 +253,7 @@ class InviteClaimV2Test {
                 // The first lookup POST is refused before it leaves the device;
                 // after consent the lookup runs again from the capability read.
                 listOf("/api/v2/invitations/capabilities", "/api/v2/invitations/capabilities",
-                    "/api/v2/invitations/lookup", "/api/v2/invitations/accept"),
+                    "/api/v2/invitations/lookup", "/api/v2/auth/password-policy", "/api/v2/invitations/accept"),
                 urls.map { io.ktor.http.Url(it).encodedPath },
             )
             assertEquals(listOf("secret-token", "secret-token"), bodies.map {
@@ -233,6 +273,9 @@ class InviteClaimV2Test {
                 var lookups = 0
                 val tokens = TokenManagerImpl()
                 val client = HttpClient(MockEngine { request ->
+                    if (request.url.encodedPath == "/api/v2/auth/password-policy") {
+                        return@MockEngine respond("", HttpStatusCode.NotFound)
+                    }
                     val body = if (request.url.encodedPath.endsWith("capabilities")) {
                         if (tokenInBody) capability.replace("}", ",\"token_in_body\":true}") else capability
                     } else { lookups++; lookup }

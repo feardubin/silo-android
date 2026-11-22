@@ -3,6 +3,7 @@ package org.siloserver.silo.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,8 +77,6 @@ data class PasswordChangeUiState(
     val lead: UiText
         get() = accountName?.ifBlank { null }?.let { UiText.Key(SharedString.PasswordChangeLead, listOf(it)) }
             ?: UiText.Key(SharedString.PasswordChangeLeadUnnamed)
-
-    val requirementsHint: UiText get() = requirements.hint
 }
 
 /**
@@ -93,9 +92,8 @@ class PasswordChangeViewModel(
     private val _uiState = MutableStateFlow(PasswordChangeUiState())
     val uiState: StateFlow<PasswordChangeUiState> = _uiState.asStateFlow()
 
-    init {
-        viewModelScope.launch { load() }
-    }
+    private val initialLoad = viewModelScope.launch { load() }
+    private var saveJob: Job? = null
 
     fun onCurrentPasswordChanged(value: String) = _uiState.update { it.copy(currentPassword = value) }
     fun onNewPasswordChanged(value: String) = _uiState.update { it.copy(newPassword = value) }
@@ -103,7 +101,8 @@ class PasswordChangeViewModel(
     fun onFinishedConsumed() = _uiState.update { it.copy(finished = false) }
 
     fun save() {
-        viewModelScope.launch { submit() }
+        if (saveJob?.isActive == true) return
+        saveJob = viewModelScope.launch { submit() }
     }
 
     fun confirmChange() {
@@ -133,6 +132,7 @@ class PasswordChangeViewModel(
     }
 
     internal suspend fun submit() {
+        initialLoad.join()
         val state = _uiState.value
         if (state.phase != PasswordChangePhase.Editing) return
         val invalid = if (state.currentPassword.isEmpty()) {

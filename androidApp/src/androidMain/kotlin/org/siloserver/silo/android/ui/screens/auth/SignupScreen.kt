@@ -29,6 +29,7 @@ import org.siloserver.silo.android.ui.components.marquee.MarqueeStage
 import org.siloserver.silo.android.ui.components.marquee.MarqueeTextField
 import org.siloserver.silo.common.i18n.text
 import org.siloserver.silo.common.ui.marquee.MarqueeScrimStyle
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 
 /**
  * Account registration with an invite code, laid out like the other
@@ -84,6 +85,7 @@ fun SignupScreen(
                 placeholder = stringResource(CommonR.string.tvSignIn_form_passwordPlaceholder),
                 isSecure = true,
             )
+            PasswordPolicyHints(state.requirements, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             MarqueeSeparator()
             MarqueeTextField(
                 value = state.inviteCode,

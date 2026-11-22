@@ -115,3 +115,24 @@ internal data class PasswordCapabilityV2(
 ) {
     fun domain() = PasswordCapability(state, allowed, minimumPasswordLength, maximumPasswordBytes)
 }
+
+/** Optional members let older or partial responses fall back individually. */
+@Serializable
+internal data class PasswordPolicyV2(
+    @SerialName("minimum_length") private val minimum: Int? = null,
+    @SerialName("maximum_bytes") private val maximum: Int? = null,
+    @SerialName("require_uppercase") private val requireUppercase: Boolean = false,
+    @SerialName("require_special") private val requireSpecial: Boolean = false,
+) {
+    private val minimumLength get() = minimum?.takeIf { it in 8..72 }
+    private val maximumBytes get() = maximum?.takeIf { it in 1..72 }
+
+    val hasLengthLimits get() = minimumLength != null && maximumBytes != null
+
+    fun requirements(fallback: PasswordRequirements) = PasswordRequirements(
+        minimumLength = minimumLength ?: fallback.minimumLength,
+        maximumBytes = maximumBytes ?: fallback.maximumBytes,
+        requireUppercase = requireUppercase,
+        requireSpecial = requireSpecial,
+    )
+}

@@ -1,5 +1,9 @@
 package org.siloserver.silo.viewmodel
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -11,6 +15,12 @@ import kotlinx.coroutines.test.setMain
 import org.siloserver.silo.model.auth.PasswordRequirements
 import org.siloserver.silo.model.auth.User
 import org.siloserver.silo.network.ApiResult
+import org.siloserver.silo.network.AuthScopeSnapshot
+import org.siloserver.silo.network.TokenManager
+import org.siloserver.silo.network.TokenManagerImpl
+import org.siloserver.silo.network.api.AuthApi
+import org.siloserver.silo.network.apiv2.ApiV2Gate
+import org.siloserver.silo.repository.AuthRepository
 import org.siloserver.silo.network.api.WRONG_CURRENT_PASSWORD
 import androidx.lifecycle.viewModelScope
 import kotlin.test.Test
@@ -28,6 +38,7 @@ import org.siloserver.silo.model.auth.PasswordChangeError
  * password, refreshes the session so the server lifts its restriction, and
  * only then continues to profiles.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class PasswordChangeViewModelTest {
 
     private class FakeAccount(
@@ -67,7 +78,7 @@ class PasswordChangeViewModelTest {
         }
     }
 
-    private suspend fun TestScope.withModel(account: FakeAccount, block: suspend (PasswordChangeViewModel) -> Unit) {
+    private suspend fun TestScope.withModel(account: TemporaryPasswordAccount, block: suspend (PasswordChangeViewModel) -> Unit) {
         Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
         val model = PasswordChangeViewModel(account)
         try {
@@ -91,7 +102,7 @@ class PasswordChangeViewModelTest {
             val state = model.uiState.value
             assertEquals(PasswordChangePhase.Editing, state.phase)
             assertEquals("member", state.accountName)
-            assertEquals(UiText.Plural(SharedPlural.PasswordRequirement, 10), state.requirementsHint)
+            assertEquals(UiText.Plural(SharedPlural.PasswordRequirement, 10), state.requirements.hint)
             assertEquals(listOf("read"), account.calls)
         }
     }
@@ -247,6 +258,46 @@ class PasswordChangeViewModelTest {
                 assertEquals(PasswordChangePhase.Editing, model.uiState.value.phase, refusal.error)
                 assertEquals(listOf("read", "change"), account.calls, refusal.error)
             }
+        }
+    }
+
+    @Test
+    fun missingPublicPolicyUsesCapabilityAndThenDefaults() = runTest {
+        for ((capability, expected) in listOf(
+            """{"state":"available","allowed":true,"minimum_password_length":12,"maximum_password_bytes":64}""" to
+                PasswordRequirements(minimumLength = 12, maximumBytes = 64),
+            null to PasswordRequirements.ServerDefault,
+        )) {
+            val paths = mutableListOf<String>()
+            val client = HttpClient(MockEngine { request ->
+                val path = request.url.encodedPath
+                paths += path
+                assertTrue(path in listOf("/api/v2/auth/password-policy", "/api/v2/account/password/capability"), path)
+                if (path.endsWith("/capability") && capability != null) respond(capability, HttpStatusCode.OK)
+                else respond("", HttpStatusCode.NotFound)
+            })
+            val scope = AuthScopeSnapshot("server", null, "https://silo.example.test", null)
+            val tokens = object : TokenManager by TokenManagerImpl() {
+                override suspend fun snapshotCurrentScope() = scope
+            }
+            val repository = AuthRepository(AuthApi(client, ApiV2Gate.Unrestricted), tokens)
+            val account = FakeAccount()
+            val oldServer = object : TemporaryPasswordAccount by account {
+                override suspend fun passwordRequirements() = repository.passwordRequirements()
+            }
+            try {
+                withModel(oldServer) { model ->
+                    model.fill("a".repeat(expected.minimumLength - 1))
+                    model.submit()
+                    assertEquals(expected, model.uiState.value.requirements)
+                    assertEquals(listOf("/api/v2/auth/password-policy", "/api/v2/account/password/capability"), paths)
+                    assertEquals(PasswordChangeError.TooShort(expected.minimumLength), model.uiState.value.error)
+                    assertFalse("change" in account.calls)
+                    model.fill("a".repeat(expected.minimumLength))
+                    model.submit()
+                    assertTrue(model.uiState.value.finished)
+                }
+            } finally { client.close() }
         }
     }
 

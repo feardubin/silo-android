@@ -31,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import org.siloserver.silo.common.R as CommonR
 import org.siloserver.silo.common.i18n.text
+import org.siloserver.silo.common.ui.marquee.PasswordPolicyHints
 import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeBody
 import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeButton
 import org.siloserver.silo.tv.ui.components.marquee.TvMarqueeButtonKind
@@ -113,6 +114,7 @@ fun TvSignupScreen(
                             enabled = !state.isLoading,
                         )
                     }
+                    PasswordPolicyHints(state.requirements)
                     Box(Modifier.tvImeAwareFieldContext()) {
                         TvMarqueeField(
                             value = state.inviteCode,
