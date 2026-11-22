@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Button
 import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
@@ -37,10 +39,30 @@ import org.siloserver.silo.tv.cast.TvSiloCastReceiver
 /**
  * Full-screen takeover while a phone controls the TV with nothing playing:
  * "Ready for <phone>", or, while a profile handoff prepares a title the phone
- * is about to play, "Starting <title>" with a spinner.
+ * is about to play, "Starting <title>" with a spinner. Back disconnects
+ * the remote, like the button.
  */
 @Composable
 fun TvSiloCastStandbyView(
+    state: TvSiloCastReceiver.StandbyState,
+    onDisconnect: () -> Unit,
+) {
+    // The separate window owns Back and D-pad focus while destinations and
+    // their key handlers stay composed underneath.
+    Dialog(
+        onDismissRequest = onDisconnect,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        TvSiloCastStandbyContent(state, onDisconnect)
+    }
+}
+
+@Composable
+private fun TvSiloCastStandbyContent(
     state: TvSiloCastReceiver.StandbyState,
     onDisconnect: () -> Unit,
 ) {
