@@ -97,6 +97,7 @@ internal class SiloMediaLoadErrorHandlingPolicy(
     }
 
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        if (loadErrorInfo.exception.isPlaybackTransportSuperseded()) return C.TIME_UNSET
         val invalidResponse = loadErrorInfo.exception as? HttpDataSource.InvalidResponseCodeException
         val event = loadErrorInfo.loadEventInfo
         val bytesLoaded = attemptBytesTracker.bytesLoadedForAttempt(event.loadTaskId, event.bytesLoaded)

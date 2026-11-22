@@ -24,6 +24,9 @@ const val DIRECT_STREAM_RESUME_V1_FEATURE = "direct_stream_resume_v1"
 const val EMBEDDED_SUBTITLES_V1_FEATURE = "embedded_subtitles_v1"
 const val NATIVE_HLS_PLAYBACK_V1_FEATURE = "native_hls_playback_v1"
 
+/** The HLS client follows server-issued URIs carrying the opaque `silo_transport` marker. */
+const val HLS_TRANSPORT_MARKER_V1_FEATURE = "hls_transport_marker_v1"
+
 /**
  * A `server_transcode_hls` plan may carry its embedded text subtitle as a
  * WebVTT `SUBTITLES` rendition of the plan's own HLS stream

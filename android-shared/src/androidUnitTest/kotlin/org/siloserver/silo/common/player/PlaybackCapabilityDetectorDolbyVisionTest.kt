@@ -32,7 +32,7 @@ import kotlin.test.assertTrue
 class PlaybackCapabilityDetectorDolbyVisionTest {
 
     @Test
-    fun phoneAndTvAdvertiseNativeHlsOnlyOnMedia3HlsDelivery() {
+    fun phoneAndTvAdvertiseNativeHlsFeaturesOnlyOnMedia3HlsDelivery() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val detector = PlaybackCapabilityDetector(
             context = context,
@@ -60,6 +60,9 @@ class PlaybackCapabilityDetectorDolbyVisionTest {
                 NATIVE_HLS_PLAYBACK_V1_FEATURE in playbackContext.deliveries.getValue(DELIVERY_CLASS_PROGRESSIVE).features,
                 "$formFactor must not apply the HLS sample-entry contract to progressive delivery",
             )
+            val marker = "hls_transport_marker_v1"
+            assertEquals(setOf(DELIVERY_CLASS_HLS), playbackContext.deliveries.filterValues { marker in it.features }.keys)
+            assertFalse(marker in playbackClientFeaturesV3(playbackContext))
             assertTrue(
                 HLS_SUBTITLE_RENDITIONS_V1_FEATURE in playbackClientFeaturesV3(playbackContext),
                 "$formFactor selects HLS subtitle renditions in Media3",

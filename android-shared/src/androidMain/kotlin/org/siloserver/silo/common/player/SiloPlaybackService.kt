@@ -189,7 +189,7 @@ class SiloPlaybackService : MediaSessionService() {
         // change applies without restarting playback. The UIs and PiP keep
         // talking to the unwrapped player via [activePlayer].
         val sessionPlayer = SeekIntervalForwardingPlayer(
-            player = player,
+            player = SupersededTransportFilteringPlayer(player),
             audiobookSeek = audiobookSeekRouter::seek,
         ) { seekIntervalStore.state.value }
         mediaSession = MediaSession.Builder(this, sessionPlayer)
@@ -378,12 +378,8 @@ class SiloPlaybackService : MediaSessionService() {
         subtitleSyncJob?.cancel()
         scope.cancel()
         mediaSession?.run {
-            // Release the unwrapped player: the factory's libass teardown
-            // needs the ExoPlayer, not the session's forwarding wrapper.
-            val sessionPlayer = player
-            playerFactory.releasePlayer(
-                (sessionPlayer as? SeekIntervalForwardingPlayer)?.wrappedPlayer ?: sessionPlayer,
-            )
+            // The factory's libass teardown needs the ExoPlayer.
+            activePlayer?.let(playerFactory::releasePlayer)
             release()
         }
         mediaSession = null

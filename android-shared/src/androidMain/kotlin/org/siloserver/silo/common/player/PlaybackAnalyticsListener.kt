@@ -225,6 +225,7 @@ class PlaybackAnalyticsListener : AnalyticsListener {
         eventTime: AnalyticsListener.EventTime,
         error: PlaybackException,
     ) {
+        if (error.isPlaybackTransportSuperseded()) return
         Log.e(TAG, "Player error ${error.errorCodeName}: ${error.message}", error)
         DiagnosticsPlaybackLogger.playerError(error.toDiagnosticsDetail())
         emit(Event.PlayerError(error))
@@ -237,6 +238,7 @@ class PlaybackAnalyticsListener : AnalyticsListener {
         error: java.io.IOException,
         wasCanceled: Boolean,
     ) {
+        if (error.isPlaybackTransportSuperseded()) return
         DiagnosticsPlaybackLogger.loadError(mediaLoadErrorDiagnosticsDetail(mediaLoadData, error, wasCanceled))
         emit(Event.LoadError(error))
     }

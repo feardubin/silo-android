@@ -376,7 +376,9 @@ class SiloPlayerFactory(
             .setDataSourceFactory(progressiveDataSources)
             .setSubtitleParserFactory(embeddedSubtitleParserFactory)
             .setLoadErrorHandlingPolicy(mediaLoadErrorHandlingPolicy)
-        val hlsMediaSourceFactory = HlsMediaSource.Factory(contentDataSourceFactory)
+        val hlsMediaSourceFactory = HlsMediaSource.Factory(
+            contentDataSourceFactory.withSupersededHlsTransportHandling(),
+        )
             .setExtractorFactory(hlsExtractorFactory)
             .setSubtitleParserFactory(embeddedSubtitleParserFactory)
             .setLoadErrorHandlingPolicy(mediaLoadErrorHandlingPolicy)
