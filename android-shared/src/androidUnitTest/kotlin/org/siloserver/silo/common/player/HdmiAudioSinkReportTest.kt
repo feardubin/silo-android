@@ -1,7 +1,9 @@
 package org.siloserver.silo.common.player
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -17,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.AudioDeviceInfoBuilder
+import org.robolectric.shadows.AudioProfileBuilder
 import org.robolectric.shadows.ShadowBuild
 import org.siloserver.silo.model.playback.ClientPlaybackContext
 import org.siloserver.silo.model.playback.LAYOUT_AWARE_PASSTHROUGH_FEATURE
@@ -130,6 +133,57 @@ class HdmiAudioSinkReportTest {
         Settings.Global.putString(context.contentResolver, "encoded_surround_output", "2")
         shadowOf(Looper.getMainLooper()).idle()
         assertEntriesAndFeature(manager, expected = false)
+    }
+
+    @Test
+    fun tvNeverSurroundWithdrawsAc3EvenWhenHdmiStillReportsIt() {
+        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+        shadowOf(uiModeManager).setCurrentModeType(Configuration.UI_MODE_TYPE_TELEVISION)
+        context.sendStickyBroadcast(pluggedIntent(6, AudioFormat.ENCODING_AC3, AudioFormat.ENCODING_E_AC3))
+        val manager = AudioCapabilityManager(context)
+        shadowOf(Looper.getMainLooper()).idle()
+        val before = manager.capabilities.value
+        assertTrue("ac3" in before.passthroughCodecs)
+        assertTrue(before.entries.any { it.codec == "ac3" })
+
+        Settings.Global.putString(context.contentResolver, "encoded_surround_output", "1")
+        shadowOf(Looper.getMainLooper()).idle()
+        val after = manager.capabilities.value
+        assertFalse("ac3" in after.passthroughCodecs)
+        assertFalse(after.entries.any { it.codec == "ac3" })
+        assertTrue("eac3" in after.passthroughCodecs)
+        assertEquals(before.maxChannels, after.maxChannels)
+
+        Settings.Global.putString(context.contentResolver, "encoded_surround_output", "0")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(before, manager.capabilities.value)
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun tvNeverSurroundRefreshesAc3WhenTheDirectProfilesStayUnchanged() {
+        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+        shadowOf(uiModeManager).setCurrentModeType(Configuration.UI_MODE_TYPE_TELEVISION)
+        val profile = AudioProfileBuilder.newBuilder()
+            .setFormat(AudioFormat.ENCODING_AC3)
+            .setSamplingRates(intArrayOf(48_000))
+            .setChannelMasks(intArrayOf(AudioFormat.CHANNEL_OUT_5POINT1))
+            .build()
+        val hdmi = AudioDeviceInfoBuilder.newBuilder()
+            .setType(AudioDeviceInfo.TYPE_HDMI)
+            .setProfiles(listOf(profile))
+            .build()
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        shadowOf(audioManager).addOutputDeviceWithDirectProfiles(hdmi)
+        val manager = AudioCapabilityManager(context)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("ac3" in manager.capabilities.value.passthroughCodecs)
+
+        Settings.Global.putString(context.contentResolver, "encoded_surround_output", "1")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(AudioCapabilities.getCapabilities(context).supportsEncoding(AudioFormat.ENCODING_AC3))
+        assertFalse("ac3" in manager.capabilities.value.passthroughCodecs)
     }
 
     @Test

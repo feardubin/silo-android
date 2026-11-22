@@ -45,6 +45,7 @@ import org.siloserver.silo.network.localroute.LocalRoutes
 import org.siloserver.silo.common.player.audio.DelayAudioProcessor
 import org.siloserver.silo.common.player.audio.HdmiSinkDtsSupport
 import org.siloserver.silo.common.player.audio.PassthroughSuppressingAudioSink
+import org.siloserver.silo.common.player.audio.TvAc3OutputPolicy
 import org.siloserver.silo.common.player.subtitle.OffsetSubtitleParserFactory
 import org.siloserver.silo.common.player.subtitle.PgsSupExtractor
 import org.siloserver.silo.common.player.subtitle.SidecarPlaybackFloor
@@ -97,6 +98,7 @@ class SiloPlayerFactory(
     sidecarSubtitleHttpDataSourceFactory: HttpDataSource.Factory = httpDataSourceFactory,
 ) {
     val isTv: Boolean = TvModeDetector.isTv(context)
+    private val ac3OutputPolicy = TvAc3OutputPolicy(context, isTv)
 
     private var serverUrl: String = ""
     private data class RequestHeaderScope(
@@ -223,8 +225,8 @@ class SiloPlayerFactory(
         // extension renderers (FFmpeg audio) follow the platform renderers and
         // fill codec gaps. This keeps native passthrough/MediaCodec paths
         // preferred while retaining a last-resort local decoder for
-        // forced-original and recovery cases. The one exception is DTS on an
-        // HDMI sink without DTS, which goes to FFmpeg (see [HdmiSinkDtsSupport]).
+        // forced-original and recovery cases. DTS on HDMI sinks without DTS
+        // and AC-3 with Never Surround on TV can explicitly select FFmpeg.
         //
         // When the flag is off (compile-time bisect), we set _MODE_OFF
         // rather than _MODE_ON so extension renderers are *not even
@@ -250,8 +252,9 @@ class SiloPlayerFactory(
                 )
                 .build(),
             forceDecode = { format ->
-                preferFfmpegAudio &&
-                    HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, format.sampleMimeType)
+                ac3OutputPolicy.requiresPcm(format.sampleMimeType) ||
+                    (preferFfmpegAudio &&
+                        HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, format.sampleMimeType))
             },
         )
 
@@ -332,7 +335,8 @@ class SiloPlayerFactory(
                     // MIME, so on such a sink it is left without a local
                     // decoder and goes back to the server, which beats silence.
                     preferFfmpegAudio && !requiresSecureDecoder &&
-                        HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, mimeType) -> emptyList()
+                        (HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, mimeType) ||
+                            ac3OutputPolicy.shouldDecodeWithFfmpeg(mimeType)) -> emptyList()
                     else -> infos
                 }
             }

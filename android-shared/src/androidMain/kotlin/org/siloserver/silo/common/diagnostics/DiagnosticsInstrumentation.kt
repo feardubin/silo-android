@@ -148,8 +148,19 @@ object DiagnosticsPlaybackLogger {
     )
 
     fun audioDecoderInitialized(decoderName: String) = playbackInfo(
-        "audio decoder initialized",
+        "audio decoder initialized decoder=$decoderName",
         mapOf("decoder" to SiloLogAttribute.Text(decoderName)),
+    )
+
+    fun audioTrackInitialized(
+        output: String,
+        encoding: Int,
+        sampleRate: Int,
+        channelConfig: Int,
+        tunneling: Boolean,
+    ) = playbackInfo(
+        "audio track initialized output=$output encoding=$encoding sampleRate=$sampleRate " +
+            "channelMask=0x${channelConfig.toString(16)} tunneling=$tunneling",
     )
 
     fun videoFormatChanged(format: String?, width: Int, height: Int, hdrMode: String?) = playbackInfo(
@@ -162,8 +173,8 @@ object DiagnosticsPlaybackLogger {
         },
     )
 
-    fun audioFormatChanged(format: String?) = playbackInfo(
-        "audio format changed",
+    fun audioFormatChanged(format: String?, channels: Int, sampleRate: Int) = playbackInfo(
+        "audio format changed mime=$format channels=$channels sampleRate=$sampleRate",
         format?.let { mapOf("fmt" to SiloLogAttribute.Text(it)) }.orEmpty(),
     )
 

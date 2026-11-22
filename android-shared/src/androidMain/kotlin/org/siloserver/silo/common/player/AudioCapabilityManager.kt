@@ -18,10 +18,12 @@ import android.provider.Settings
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioCapabilitiesReceiver
 import org.siloserver.silo.common.player.audio.HdmiSinkDtsSupport
+import org.siloserver.silo.common.player.audio.TvAc3OutputPolicy
 import org.siloserver.silo.model.playback.AudioPassthroughCapabilities
 import org.siloserver.silo.model.playback.AudioPassthroughEntry
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,7 +80,7 @@ internal fun audioPlanningRouteIdentity(
  * Backed by [AudioCapabilitiesReceiver], which monitors:
  * - `Intent.ACTION_HDMI_AUDIO_PLUG` (TV form factor — AVR power on/off, EDID renegotiation)
  * - `AudioDeviceCallback` adds/removes (Q+ in Media3; pre-Q registered here)
- * - Global surround settings (pre-Q evidence is invalidated here independently of Media3)
+ * - Global surround settings (pre-Q evidence and TV AC-3 policy)
  * - `Spatializer.OnSpatializerStateChangedListener` on Android 12+
  *
  * The manager registers at construction and lives for the application lifetime
@@ -90,6 +92,8 @@ class AudioCapabilityManager(
     context: Context,
 ) {
     private val appContext = context.applicationContext
+    private val isTv = TvModeDetector.isTv(appContext)
+    private val ac3OutputPolicy = TvAc3OutputPolicy(appContext, isTv)
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val mediaAttrs = AudioAttributes.Builder()
@@ -202,7 +206,7 @@ class AudioCapabilityManager(
     private val hdmiEvidenceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (!isInitialStickyBroadcast) {
-                refreshPreQCapabilities()
+                refreshCapabilities()
             }
         }
     }
@@ -210,15 +214,15 @@ class AudioCapabilityManager(
     // Media3 only registers its device callback on Q+. Before Q a USB,
     // Bluetooth, wired or line output can own playback while HDMI stays plugged.
     private val preQDeviceCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) = refreshPreQCapabilities()
-        override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) = refreshPreQCapabilities()
+        override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) = refreshCapabilities()
+        override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) = refreshCapabilities()
     }
 
-    private val preQSurroundSettingsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) = refreshPreQCapabilities()
+    private val surroundSettingsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = refreshCapabilities()
     }
 
-    private fun refreshPreQCapabilities() {
+    private fun refreshCapabilities() {
         val caps = AudioCapabilities.getCapabilities(appContext, mediaAttrs, null, emptyList())
         publishCapabilities(mapCapabilities(caps))
     }
@@ -251,16 +255,21 @@ class AudioCapabilityManager(
         val initialCapabilities = receiver.register()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             audioManager.registerAudioDeviceCallback(preQDeviceCallback, Handler(Looper.getMainLooper()))
-            for (setting in PRE_Q_SURROUND_SETTINGS) {
-                appContext.contentResolver.registerContentObserver(
-                    Settings.Global.getUriFor(setting), false, preQSurroundSettingsObserver,
-                )
-            }
             appContext.registerReceiver(
                 hdmiEvidenceReceiver,
                 IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG),
                 /* broadcastPermission = */ null,
                 Handler(Looper.getMainLooper()),
+            )
+        }
+        val surroundSettings = when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> PRE_Q_SURROUND_SETTINGS
+            isTv -> listOf(TvAc3OutputPolicy.SURROUND_SETTING)
+            else -> emptyList()
+        }
+        for (setting in surroundSettings) {
+            appContext.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(setting), false, surroundSettingsObserver,
             )
         }
         publishCapabilities(mapCapabilities(initialCapabilities))
@@ -311,11 +320,14 @@ class AudioCapabilityManager(
                 ?: caps.maxChannelCount.coerceAtLeast(2)
         }
 
+        // Keep the existing aggregate ceiling. The policy withdraws encoded
+        // AC-3 output evidence and says nothing about the PCM channel limit.
+        val decodeAc3 = ac3OutputPolicy.requiresPcm(MimeTypes.AUDIO_AC3)
         return AudioPassthroughCapabilities(
-            passthroughCodecs = codecs,
+            passthroughCodecs = if (decodeAc3) codecs.filterNot { it == "ac3" } else codecs,
             spatializerEnabled = spatializerEnabled,
             maxChannels = maxChannels,
-            entries = entries,
+            entries = if (decodeAc3) entries.filterNot { it.codec == "ac3" } else entries,
         )
     }
 
@@ -445,7 +457,7 @@ class AudioCapabilityManager(
             }
         ) return@runCatching false
         val resolver = appContext.contentResolver
-        val surroundPolicy = Settings.Global.getString(resolver, "encoded_surround_output")
+        val surroundPolicy = Settings.Global.getString(resolver, TvAc3OutputPolicy.SURROUND_SETTING)
         if (surroundPolicy != null && surroundPolicy.toIntOrNull() != 0) return@runCatching false
         // external_surround_sound_enabled is deliberately not consulted: a Fire
         // TV Cube (Fire OS 7) set to Surround Sound "Best Available" reports 0,
@@ -525,7 +537,7 @@ class AudioCapabilityManager(
         const val ROUTE_HASH_BYTES = 16
         val DTS_CODECS = setOf("dts", "dts_hd")
         val PRE_Q_SURROUND_SETTINGS = listOf(
-            "encoded_surround_output", "use_external_surround_sound_flag", "external_surround_sound_enabled",
+            TvAc3OutputPolicy.SURROUND_SETTING, "use_external_surround_sound_flag", "external_surround_sound_enabled",
         )
 
         val encodingSupport = listOf(

@@ -2,6 +2,7 @@ package org.siloserver.silo.common.player.audio
 
 import androidx.media3.common.Format
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.AudioOffloadSupport
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 
@@ -89,6 +90,11 @@ class PassthroughSuppressingAudioSink(
 ) : ForwardingAudioSink(delegate) {
     override fun supportsFormat(format: Format): Boolean =
         getFormatSupport(format) != AudioSink.SINK_FORMAT_UNSUPPORTED
+
+    // Media3 can bypass decoding via offload even if passthrough is unsupported.
+    override fun getFormatOffloadSupport(format: Format): AudioOffloadSupport =
+        if (forceDecode(format)) AudioOffloadSupport.DEFAULT_UNSUPPORTED
+        else delegate.getFormatOffloadSupport(format)
 
     override fun getFormatSupport(format: Format): Int =
         if (PassthroughSuppressionRegistry.isSuppressed(format) || forceDecode(format)) {

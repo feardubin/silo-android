@@ -149,7 +149,15 @@ class PlaybackAnalyticsListener : AnalyticsListener {
         eventTime: AnalyticsListener.EventTime,
         audioTrackConfig: AudioSink.AudioTrackConfig,
     ) {
-        _audioOutputPath.value = audioOutputPathOf(audioTrackConfig)
+        val outputPath = audioOutputPathOf(audioTrackConfig)
+        _audioOutputPath.value = outputPath
+        DiagnosticsPlaybackLogger.audioTrackInitialized(
+            output = outputPath.name,
+            encoding = audioTrackConfig.encoding,
+            sampleRate = audioTrackConfig.sampleRate,
+            channelConfig = audioTrackConfig.channelConfig,
+            tunneling = audioTrackConfig.tunneling,
+        )
     }
 
     // onAudioTrackReleased is deliberately ignored: DefaultAudioSink releases
@@ -186,7 +194,7 @@ class PlaybackAnalyticsListener : AnalyticsListener {
         format: Format,
         decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?,
     ) {
-        DiagnosticsPlaybackLogger.audioFormatChanged(format.sampleMimeType)
+        DiagnosticsPlaybackLogger.audioFormatChanged(format.sampleMimeType, format.channelCount, format.sampleRate)
         emit(Event.AudioFormatChanged(format))
     }
 

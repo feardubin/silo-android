@@ -2,6 +2,7 @@ package org.siloserver.silo.common.player.audio
 
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.audio.AudioOffloadSupport
 import androidx.media3.exoplayer.audio.AudioSink
 import java.lang.reflect.Proxy
 import kotlin.test.assertEquals
@@ -89,6 +90,28 @@ class PassthroughSuppressionRegistryTest {
         assertTrue(PassthroughSuppressionRegistry.suppressForSinglePcmRetry(MimeTypes.AUDIO_TRUEHD, 8))
         assertEquals(AudioSink.SINK_FORMAT_UNSUPPORTED, sink.getFormatSupport(trueHdEightChannel))
         assertFalse(sink.supportsFormat(trueHdEightChannel))
+    }
+
+    @Test
+    fun forceDecodeAlsoBlocksOffloadForTheMatchingFormat() {
+        val offloadSupport = AudioOffloadSupport.Builder().setIsFormatSupported(true).build()
+        val delegate = Proxy.newProxyInstance(
+            AudioSink::class.java.classLoader,
+            arrayOf(AudioSink::class.java),
+        ) { _, method, _ ->
+            when (method.name) {
+                "getFormatOffloadSupport" -> offloadSupport
+                else -> error("Unexpected delegate call: ${method.name}")
+            }
+        } as AudioSink
+        val sink = PassthroughSuppressingAudioSink(delegate) { format ->
+            format.sampleMimeType == MimeTypes.AUDIO_AC3
+        }
+        val ac3 = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AC3).setChannelCount(6).build()
+        val eac3 = ac3.buildUpon().setSampleMimeType(MimeTypes.AUDIO_E_AC3).build()
+
+        assertFalse(sink.getFormatOffloadSupport(ac3).isFormatSupported)
+        assertTrue(sink.getFormatOffloadSupport(eac3).isFormatSupported)
     }
 
     @Test
