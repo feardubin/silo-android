@@ -18,12 +18,11 @@ import android.provider.Settings
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioCapabilitiesReceiver
 import org.siloserver.silo.common.player.audio.HdmiSinkDtsSupport
-import org.siloserver.silo.common.player.audio.TvAc3OutputPolicy
+import org.siloserver.silo.common.player.audio.TvSurroundOutputPolicy
 import org.siloserver.silo.model.playback.AudioPassthroughCapabilities
 import org.siloserver.silo.model.playback.AudioPassthroughEntry
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,22 +53,26 @@ data class AudioPlaybackRouteSnapshot(
  * Media3 tears down and recreates an audio sink, so including it makes a player
  * remount look like a physical route change and feeds the remount back into
  * another server replan. The server does not route on this flag; it remains in
- * the published diagnostics/capability snapshot.
+ * the published diagnostics/capability snapshot. The PCM-only policy affects
+ * renderer selection even if the sink never advertised encoded passthrough.
  */
 internal data class AudioPlanningRouteIdentity(
     val sinkType: String,
     val routeHashes: List<String>,
     val capabilities: AudioPassthroughCapabilities,
+    val pcmOnly: Boolean,
 )
 
 internal fun audioPlanningRouteIdentity(
     sinkType: String,
     routeHashes: List<String>,
     capabilities: AudioPassthroughCapabilities,
+    pcmOnly: Boolean = false,
 ): AudioPlanningRouteIdentity = AudioPlanningRouteIdentity(
     sinkType = sinkType,
     routeHashes = routeHashes.distinct().sorted(),
     capabilities = capabilities.copy(spatializerEnabled = false),
+    pcmOnly = pcmOnly,
 )
 
 /**
@@ -80,7 +83,7 @@ internal fun audioPlanningRouteIdentity(
  * Backed by [AudioCapabilitiesReceiver], which monitors:
  * - `Intent.ACTION_HDMI_AUDIO_PLUG` (TV form factor — AVR power on/off, EDID renegotiation)
  * - `AudioDeviceCallback` adds/removes (Q+ in Media3; pre-Q registered here)
- * - Global surround settings (pre-Q evidence and TV AC-3 policy)
+ * - Global surround settings (pre-Q evidence and TV surround policy)
  * - `Spatializer.OnSpatializerStateChangedListener` on Android 12+
  *
  * The manager registers at construction and lives for the application lifetime
@@ -93,7 +96,7 @@ class AudioCapabilityManager(
 ) {
     private val appContext = context.applicationContext
     private val isTv = TvModeDetector.isTv(appContext)
-    private val ac3OutputPolicy = TvAc3OutputPolicy(appContext, isTv)
+    private val surroundOutputPolicy = TvSurroundOutputPolicy(appContext, isTv)
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val mediaAttrs = AudioAttributes.Builder()
@@ -115,7 +118,12 @@ class AudioCapabilityManager(
     private var routeSnapshotInitialized = false
     private var planningRouteIdentity: AudioPlanningRouteIdentity? = null
 
-    private fun publishCapabilities(next: AudioPassthroughCapabilities) {
+    private fun publishCapabilities(caps: AudioCapabilities) {
+        val pcmOnly = surroundOutputPolicy.requiresPcm()
+        publishCapabilities(mapCapabilities(caps, pcmOnly), pcmOnly)
+    }
+
+    private fun publishCapabilities(next: AudioPassthroughCapabilities, pcmOnly: Boolean) {
         val capabilitiesChanged = _capabilities.value != next
         val devices = runCatching(::currentOutputDevices).getOrDefault(emptyList())
         val sinkType = sinkType(devices)
@@ -123,6 +131,7 @@ class AudioCapabilityManager(
             sinkType = sinkType,
             routeHashes = devices.map(::routeHash),
             capabilities = next,
+            pcmOnly = pcmOnly,
         )
         val routeChanged = planningRouteIdentity != nextRouteIdentity
         if (!capabilitiesChanged && !routeChanged && routeSnapshotInitialized) return
@@ -144,7 +153,7 @@ class AudioCapabilityManager(
             TAG,
             "Audio output capabilities updated: " +
                 "codecs=${next.passthroughCodecs} maxChannels=${next.maxChannels} " +
-                "entries=${next.entries}",
+                "entries=${next.entries} pcmOnly=$pcmOnly",
         )
     }
 
@@ -195,7 +204,7 @@ class AudioCapabilityManager(
 
     private val receiver = AudioCapabilitiesReceiver(
         appContext,
-        AudioCapabilitiesReceiver.Listener { caps -> publishCapabilities(mapCapabilities(caps)) },
+        AudioCapabilitiesReceiver.Listener(::publishCapabilities),
         mediaAttrs,
         /* routedDevice = */ null,
     )
@@ -224,7 +233,7 @@ class AudioCapabilityManager(
 
     private fun refreshCapabilities() {
         val caps = AudioCapabilities.getCapabilities(appContext, mediaAttrs, null, emptyList())
-        publishCapabilities(mapCapabilities(caps))
+        publishCapabilities(caps)
     }
 
     // Spatializer (Android 12+ / API 31+). The head-tracking + enabled state
@@ -243,7 +252,10 @@ class AudioCapabilityManager(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
             runCatching {
                 SpatializerBridge(audioManager) { enabled ->
-                    publishCapabilities(_capabilities.value.copy(spatializerEnabled = enabled))
+                    publishCapabilities(
+                        _capabilities.value.copy(spatializerEnabled = enabled),
+                        pcmOnly = planningRouteIdentity?.pcmOnly ?: false,
+                    )
                 }
             }.getOrNull()
         } else null
@@ -264,7 +276,7 @@ class AudioCapabilityManager(
         }
         val surroundSettings = when {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> PRE_Q_SURROUND_SETTINGS
-            isTv -> listOf(TvAc3OutputPolicy.SURROUND_SETTING)
+            isTv -> listOf(TvSurroundOutputPolicy.SURROUND_SETTING)
             else -> emptyList()
         }
         for (setting in surroundSettings) {
@@ -272,7 +284,7 @@ class AudioCapabilityManager(
                 Settings.Global.getUriFor(setting), false, surroundSettingsObserver,
             )
         }
-        publishCapabilities(mapCapabilities(initialCapabilities))
+        publishCapabilities(initialCapabilities)
         (appContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
             ?.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
@@ -280,7 +292,10 @@ class AudioCapabilityManager(
         }
     }
 
-    private fun mapCapabilities(caps: AudioCapabilities): AudioPassthroughCapabilities {
+    private fun mapCapabilities(
+        caps: AudioCapabilities,
+        pcmOnly: Boolean,
+    ): AudioPassthroughCapabilities {
         // The platform can accept DTS for a sink that does not decode it (an
         // Amlogic box in front of an LG 2025 TV); never claim passthrough there.
         val sinkDecodesDts by lazy { HdmiSinkDtsSupport.hdmiSinkDecodesDts(appContext) }
@@ -320,14 +335,13 @@ class AudioCapabilityManager(
                 ?: caps.maxChannelCount.coerceAtLeast(2)
         }
 
-        // Keep the existing aggregate ceiling. The policy withdraws encoded
-        // AC-3 output evidence and says nothing about the PCM channel limit.
-        val decodeAc3 = ac3OutputPolicy.requiresPcm(MimeTypes.AUDIO_AC3)
+        // Never Surround withdraws all encoded output evidence. Keep the
+        // aggregate ceiling for decoded/transcoded audio.
         return AudioPassthroughCapabilities(
-            passthroughCodecs = if (decodeAc3) codecs.filterNot { it == "ac3" } else codecs,
+            passthroughCodecs = if (pcmOnly) emptyList() else codecs,
             spatializerEnabled = spatializerEnabled,
             maxChannels = maxChannels,
-            entries = if (decodeAc3) entries.filterNot { it.codec == "ac3" } else entries,
+            entries = if (pcmOnly) emptyList() else entries,
         )
     }
 
@@ -457,7 +471,7 @@ class AudioCapabilityManager(
             }
         ) return@runCatching false
         val resolver = appContext.contentResolver
-        val surroundPolicy = Settings.Global.getString(resolver, TvAc3OutputPolicy.SURROUND_SETTING)
+        val surroundPolicy = Settings.Global.getString(resolver, TvSurroundOutputPolicy.SURROUND_SETTING)
         if (surroundPolicy != null && surroundPolicy.toIntOrNull() != 0) return@runCatching false
         // external_surround_sound_enabled is deliberately not consulted: a Fire
         // TV Cube (Fire OS 7) set to Surround Sound "Best Available" reports 0,
@@ -537,7 +551,7 @@ class AudioCapabilityManager(
         const val ROUTE_HASH_BYTES = 16
         val DTS_CODECS = setOf("dts", "dts_hd")
         val PRE_Q_SURROUND_SETTINGS = listOf(
-            TvAc3OutputPolicy.SURROUND_SETTING, "use_external_surround_sound_flag", "external_surround_sound_enabled",
+            TvSurroundOutputPolicy.SURROUND_SETTING, "use_external_surround_sound_flag", "external_surround_sound_enabled",
         )
 
         val encodingSupport = listOf(

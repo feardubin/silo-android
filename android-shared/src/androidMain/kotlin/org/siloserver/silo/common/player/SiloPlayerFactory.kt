@@ -19,8 +19,10 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -45,7 +47,8 @@ import org.siloserver.silo.network.localroute.LocalRoutes
 import org.siloserver.silo.common.player.audio.DelayAudioProcessor
 import org.siloserver.silo.common.player.audio.HdmiSinkDtsSupport
 import org.siloserver.silo.common.player.audio.PassthroughSuppressingAudioSink
-import org.siloserver.silo.common.player.audio.TvAc3OutputPolicy
+import org.siloserver.silo.common.player.audio.TvSurroundAudioRenderer
+import org.siloserver.silo.common.player.audio.TvSurroundOutputPolicy
 import org.siloserver.silo.common.player.subtitle.OffsetSubtitleParserFactory
 import org.siloserver.silo.common.player.subtitle.PgsSupExtractor
 import org.siloserver.silo.common.player.subtitle.SidecarPlaybackFloor
@@ -98,7 +101,7 @@ class SiloPlayerFactory(
     sidecarSubtitleHttpDataSourceFactory: HttpDataSource.Factory = httpDataSourceFactory,
 ) {
     val isTv: Boolean = TvModeDetector.isTv(context)
-    private val ac3OutputPolicy = TvAc3OutputPolicy(context, isTv)
+    private val surroundOutputPolicy = TvSurroundOutputPolicy(context, isTv)
 
     private var serverUrl: String = ""
     private data class RequestHeaderScope(
@@ -226,7 +229,7 @@ class SiloPlayerFactory(
         // fill codec gaps. This keeps native passthrough/MediaCodec paths
         // preferred while retaining a last-resort local decoder for
         // forced-original and recovery cases. DTS on HDMI sinks without DTS
-        // and AC-3 with Never Surround on TV can explicitly select FFmpeg.
+        // and encoded tracks with Never Surround on TV can explicitly select FFmpeg.
         //
         // When the flag is off (compile-time bisect), we set _MODE_OFF
         // rather than _MODE_ON so extension renderers are *not even
@@ -252,7 +255,7 @@ class SiloPlayerFactory(
                 )
                 .build(),
             forceDecode = { format ->
-                ac3OutputPolicy.requiresPcm(format.sampleMimeType) ||
+                surroundOutputPolicy.requiresPcm(format.sampleMimeType) ||
                     (preferFfmpegAudio &&
                         HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, format.sampleMimeType))
             },
@@ -264,6 +267,44 @@ class SiloPlayerFactory(
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): AudioSink = audioSink
+
+            override fun buildAudioRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                audioSink: AudioSink,
+                eventHandler: Handler,
+                eventListener: AudioRendererEventListener,
+                out: ArrayList<Renderer>,
+            ) {
+                val firstNewRenderer = out.size
+                super.buildAudioRenderers(
+                    context,
+                    extensionRendererMode,
+                    mediaCodecSelector,
+                    enableDecoderFallback,
+                    audioSink,
+                    eventHandler,
+                    eventListener,
+                    out,
+                )
+                if (isTv && preferFfmpegAudio) {
+                    val platformRenderer = (firstNewRenderer until out.size)
+                        .firstOrNull { out[it] is MediaCodecAudioRenderer }
+                        ?: return
+                    out[platformRenderer] = TvSurroundAudioRenderer(
+                        context,
+                        getCodecAdapterFactory(),
+                        mediaCodecSelector,
+                        enableDecoderFallback,
+                        eventHandler,
+                        eventListener,
+                        audioSink,
+                        surroundOutputPolicy,
+                    )
+                }
+            }
 
             override fun buildVideoRenderers(
                 context: Context,
@@ -332,11 +373,12 @@ class SiloPlayerFactory(
                     // silent on a sink without DTS (LG 2025 TVs). Hiding it
                     // hands the track to FFmpeg, which outputs multichannel PCM.
                     // A DTS:X track also queries plain DTS as its alternative
-                    // MIME, so on such a sink it is left without a local
-                    // decoder and goes back to the server, which beats silence.
+                    // MIME, so on such a sink it goes back to the server.
+                    // With Never Surround, the TV renderer instead checks
+                    // FFmpeg support for the source format and the sink forces PCM.
                     preferFfmpegAudio && !requiresSecureDecoder &&
-                        (HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, mimeType) ||
-                            ac3OutputPolicy.shouldDecodeWithFfmpeg(mimeType)) -> emptyList()
+                        HdmiSinkDtsSupport.shouldDecodeWithFfmpeg(context, mimeType) &&
+                        !surroundOutputPolicy.requiresPcm() -> emptyList()
                     else -> infos
                 }
             }
